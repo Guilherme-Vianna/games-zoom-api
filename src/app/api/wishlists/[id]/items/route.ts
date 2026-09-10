@@ -1,18 +1,67 @@
+import { revalidateTag, unstable_cache } from "next/cache";
 import { requireUser } from "@/lib/auth-context";
 import { error, handle, HttpError, json } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
+import { buildPageMeta, parsePageParams } from "@/lib/pagination";
 import { serializeItem } from "@/lib/serialize";
+import { buildItemsOrderBy, buildItemsWhere } from "@/lib/items-query";
 import { MAX_ADD_ENTRIES, parseAddItemsInput, type AddEntry } from "@/lib/add-items-input";
-import { fetchSteamAppDetails, fetchSteamAppIdByName, type SteamGame } from "@/lib/steam";
-import { addItemSchema } from "@/lib/validations";
-import { loadWishlistForUser } from "@/lib/wishlist-repo";
+import { findOrCreateGameForAppId } from "@/lib/game-repo";
+import { fetchSteamAppIdByName } from "@/lib/steam";
+import { addItemSchema, itemsQuerySchema } from "@/lib/validations";
+import { assertCanView, loadWishlistCounts, loadWishlistForUser } from "@/lib/wishlist-repo";
 
 type SkipReason = "duplicate" | "not_found" | "steam_error";
 
-/** Resolve uma entrada (AppID direto ou nome) no jogo da Steam. */
+/**
+ * GET /api/wishlists/:id/items — itens paginados, filtrados por aba de status,
+ * busca textual e ordenacao (tudo no banco). Resposta com `counts` por bucket
+ * para os badges das abas.
+ */
+export const GET = handle(async (req, ctx) => {
+  const user = await requireUser(req);
+  const { id } = await ctx.params;
+  const { access } = await loadWishlistForUser(id, user.id);
+  assertCanView(access);
+
+  const url = new URL(req.url);
+  const query = itemsQuerySchema.parse(Object.fromEntries(url.searchParams));
+  const { page, pageSize, skip, take } = parsePageParams(query);
+
+  const cacheKey = ["wishlist-items", id, JSON.stringify(query)];
+  const load = unstable_cache(
+    async () => {
+      const where = buildItemsWhere({ wishlistId: id, status: query.status, q: query.q });
+      const [rows, total, counts] = await Promise.all([
+        prisma.wishlistItem.findMany({
+          where,
+          orderBy: buildItemsOrderBy(query.sort),
+          skip,
+          take,
+          include: { game: true },
+        }),
+        prisma.wishlistItem.count({ where }),
+        loadWishlistCounts(id, query.q),
+      ]);
+      return { rows, total, counts };
+    },
+    cacheKey,
+    { tags: [`wishlist:${id}`, "wishlist-items"], revalidate: 300 },
+  );
+
+  const { rows, total, counts } = await load();
+
+  return json({
+    items: rows.map(serializeItem),
+    ...buildPageMeta(total, page, pageSize),
+    counts,
+  });
+});
+
+/** Resolve uma entrada (AppID direto ou nome) no Game (cache compartilhado). */
 async function resolveEntry(
   entry: AddEntry,
-): Promise<{ game: SteamGame } | { reason: SkipReason }> {
+): Promise<{ gameId: string; steamAppId: number } | { reason: SkipReason }> {
   let appId: number | null;
   try {
     appId = entry.kind === "appId" ? entry.appId : await fetchSteamAppIdByName(entry.term);
@@ -22,21 +71,20 @@ async function resolveEntry(
   }
   if (!appId) return { reason: "not_found" };
 
-  let game: SteamGame | null;
   try {
-    game = await fetchSteamAppDetails(appId);
+    const game = await findOrCreateGameForAppId(appId);
+    if (!game) return { reason: "not_found" };
+    return { gameId: game.id, steamAppId: game.steamAppId };
   } catch (err) {
     console.error("[steam] fetch appdetails falhou", err);
     return { reason: "steam_error" };
   }
-  if (!game) return { reason: "not_found" };
-  return { game };
 }
 
 /**
  * POST /api/wishlists/:id/items — adiciona um ou varios jogos.
- * `input` pode ser um link/AppID da Steam OU nomes de jogos separados por
- * virgula / quebra de linha (resolvidos por busca na loja da Steam).
+ * `input` pode ser um link/AppID da Steam OU nomes separados por virgula /
+ * quebra de linha (resolvidos por busca na loja da Steam).
  */
 export const POST = handle(async (req, ctx) => {
   const user = await requireUser(req);
@@ -64,7 +112,7 @@ export const POST = handle(async (req, ctx) => {
 
   const resolved = await Promise.all(entries.map(resolveEntry));
 
-  const added: ReturnType<typeof serializeItem>[] = [];
+  const addedIds: string[] = [];
   const skipped: { term: string; reason: SkipReason }[] = [];
 
   for (let i = 0; i < entries.length; i++) {
@@ -75,31 +123,25 @@ export const POST = handle(async (req, ctx) => {
       skipped.push({ term: entry.raw, reason: result.reason });
       continue;
     }
-
-    const game = result.game;
-    if (known.has(game.steamAppId)) {
+    if (known.has(result.steamAppId)) {
       skipped.push({ term: entry.raw, reason: "duplicate" });
       continue;
     }
-    known.add(game.steamAppId);
+    known.add(result.steamAppId);
 
     const item = await prisma.wishlistItem.create({
       data: {
         wishlistId: id,
-        steamAppId: game.steamAppId,
-        title: game.title,
-        imageUrl: game.imageUrl,
-        storeUrl: game.storeUrl,
-        isFree: game.isFree,
-        priceOverview: game.priceOverview ?? undefined,
+        steamAppId: result.steamAppId,
+        gameId: result.gameId,
         addedById: user.id,
         addedByName: user.name,
       },
     });
-    added.push(serializeItem(item));
+    addedIds.push(item.id);
   }
 
-  if (added.length === 0) {
+  if (addedIds.length === 0) {
     if (skipped.every((s) => s.reason === "duplicate")) {
       return error("Esse jogo ja esta na lista.", 409, { skipped });
     }
@@ -113,5 +155,14 @@ export const POST = handle(async (req, ctx) => {
 
   await prisma.wishlist.update({ where: { id }, data: { updatedAt: new Date() } });
 
-  return json({ added, skipped }, { status: 201 });
+  const added = await prisma.wishlistItem.findMany({
+    where: { id: { in: addedIds } },
+    include: { game: true },
+    orderBy: { createdAt: "desc" },
+  });
+
+  revalidateTag(`wishlist:${id}`, "max");
+  revalidateTag("wishlist-items", "max");
+
+  return json({ added: added.map(serializeItem), skipped }, { status: 201 });
 });

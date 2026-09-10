@@ -8,6 +8,13 @@ function required(name: string): string {
   return value;
 }
 
+function numberEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 export const env = {
   get jwtSecret() {
     return required("API_JWT_SECRET");
@@ -20,6 +27,27 @@ export const env = {
   },
   get emailTransport() {
     return (process.env.EMAIL_TRANSPORT ?? "console") as "console" | "sendpulse";
+  },
+  /** Segredo que a Vercel Cron reapresenta em `Authorization: Bearer`. */
+  get cronSecret() {
+    return required("CRON_SECRET");
+  },
+  get timezone() {
+    return process.env.APP_TIMEZONE ?? "America/Sao_Paulo";
+  },
+  /** Ajustes do job `sync-games` (defaults sensatos para a escala atual). */
+  get syncConcurrency() {
+    return numberEnv("SYNC_CONCURRENCY", 5);
+  },
+  get syncBatchSize() {
+    return numberEnv("SYNC_BATCH_SIZE", 200);
+  },
+  get maxGamesPerSync() {
+    return numberEnv("MAX_GAMES_PER_SYNC", 1500);
+  },
+  /** Idade maxima do cache de um Game antes de valer a pena buscar na Steam de novo. */
+  get gameCacheMaxAgeMs() {
+    return numberEnv("GAME_CACHE_MAX_AGE_MS", 24 * 60 * 60 * 1000);
   },
   sendpulse: {
     get senderEmail() {

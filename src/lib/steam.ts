@@ -116,12 +116,15 @@ export type SteamPriceOverview = {
   finalFormatted: string;
 };
 
+export type SteamReleaseStatus = "released" | "unreleased";
+
 export type SteamGame = {
   steamAppId: number;
   title: string;
   imageUrl: string | null;
   storeUrl: string;
   isFree: boolean;
+  releaseStatus: SteamReleaseStatus;
   priceOverview: SteamPriceOverview | null;
 };
 
@@ -133,6 +136,10 @@ type RawAppDetails = Record<
         name?: string;
         header_image?: string;
         is_free?: boolean;
+        release_date?: {
+          coming_soon?: boolean;
+          date?: string;
+        };
         price_overview?: {
           currency?: string;
           initial?: number;
@@ -175,6 +182,7 @@ export function mapAppDetails(raw: unknown, appId: number): SteamGame | null {
     imageUrl: data.header_image?.trim() || null,
     storeUrl: steamStoreUrl(appId),
     isFree: Boolean(data.is_free),
+    releaseStatus: data.release_date?.coming_soon ? "unreleased" : "released",
     priceOverview,
   };
 }

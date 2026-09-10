@@ -20,7 +20,12 @@ export const GET = handle(async (req, ctx) => {
         include: {
           owner: { select: { name: true } },
           collaborators: { select: { userId: true, createdAt: true } },
-          items: { orderBy: { createdAt: "desc" } },
+          // Previa: mostra ate 60 itens (a lista completa exige entrar).
+          items: {
+            orderBy: { createdAt: "desc" },
+            take: 60,
+            include: { game: true },
+          },
         },
       },
     },
