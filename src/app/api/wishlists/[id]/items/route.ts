@@ -28,6 +28,9 @@ export const GET = handle(async (req, ctx) => {
   const query = itemsQuerySchema.parse(Object.fromEntries(url.searchParams));
   const { page, pageSize, skip, take } = parsePageParams(query);
 
+  // Cacheia o payload JA serializado (JSON-safe) — nunca as rows cruas do Prisma:
+  // `unstable_cache` serializa o retorno, o que transformaria os `Date` em string
+  // e quebraria `serializeItem`.
   const cacheKey = ["wishlist-items", id, JSON.stringify(query)];
   const load = unstable_cache(
     async () => {
@@ -43,16 +46,16 @@ export const GET = handle(async (req, ctx) => {
         prisma.wishlistItem.count({ where }),
         loadWishlistCounts(id, query.q),
       ]);
-      return { rows, total, counts };
+      return { items: rows.map(serializeItem), total, counts };
     },
     cacheKey,
     { tags: [`wishlist:${id}`, "wishlist-items"], revalidate: 300 },
   );
 
-  const { rows, total, counts } = await load();
+  const { items, total, counts } = await load();
 
   return json({
-    items: rows.map(serializeItem),
+    items,
     ...buildPageMeta(total, page, pageSize),
     counts,
   });
