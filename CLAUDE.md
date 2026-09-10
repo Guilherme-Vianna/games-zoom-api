@@ -143,12 +143,18 @@ e-mail nao confirmado, 404, 409 conflito, 410 token expirado, 422 zod, 502 Steam
   `detectSaleTransition` (dispara `GameSaleEvent` ao entrar em promocao ou aprofundar o
   desconto). Tudo testado.
 
-## Jobs / Vercel Cron
+## Jobs / Cron
 
-- `vercel.json` -> 2 crons, ambos `0 * * * *` (**UTC**). Guardados por
-  `assertCronRequest` (`src/lib/cron-auth.ts`) = `Authorization: Bearer $CRON_SECRET`
-  (a Vercel injeta esse header quando `CRON_SECRET` esta setado). Rotas em
-  `src/app/api/cron/**`, `dynamic = "force-dynamic"`, `maxDuration = 300`.
+- Rotas em `src/app/api/cron/**`, `dynamic = "force-dynamic"`, `maxDuration = 300`,
+  guardadas por `assertCronRequest` (`src/lib/cron-auth.ts`) = `Authorization: Bearer
+  $CRON_SECRET`.
+- **Agendador = GitHub Actions** (`.github/workflows/cron.yml`, `0 * * * *`): so faz um
+  `curl` autenticado nas duas rotas de hora em hora. Motivo: o **plano Hobby da Vercel
+  so permite Vercel Cron 1x/dia** — `vercel.json` tem os crons como backstop diario
+  (`0 6 * * *`, idempotente). Secrets do repo: `API_BASE_URL`, `CRON_SECRET`.
+- O schedule do GitHub pode atrasar/pular sob carga; o TTL de 48h dos `GameSaleEvent`
+  absorve execucoes perdidas. Se migrar pro Vercel Pro, e so por os crons de volta em
+  `0 * * * *` no `vercel.json` e remover o workflow.
 - **`sync-games`** (`src/lib/sync-games.ts`): atualiza o cache `Game` contra a Steam.
   Processa a fatia mais velha (`lastSyncedAt` asc, `nulls first`) ate `MAX_GAMES_PER_SYNC`,
   em lotes de `SYNC_BATCH_SIZE` com concorrencia `SYNC_CONCURRENCY` (5) e respiro entre

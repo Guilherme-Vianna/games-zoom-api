@@ -1,0 +1,44 @@
+name: cron
+
+# O plano Hobby da Vercel so permite Vercel Cron 1x/dia. Os jobs precisam rodar
+# de hora em hora, entao o agendador e o GitHub Actions: ele so faz um curl
+# autenticado (Bearer CRON_SECRET) nas rotas /api/cron/*.
+#
+# Segredos necessarios no repo (Settings > Secrets and variables > Actions):
+#   API_BASE_URL  -> ex. https://games-zoom-api.vercel.app  (sem barra no fim)
+#   CRON_SECRET   -> o mesmo valor da env var da Vercel
+#
+# O schedule do GitHub pode atrasar/pular sob carga; o TTL de 48h dos
+# GameSaleEvent absorve execucoes perdidas.
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: cron
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: sync-games
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -fsS --max-time 300 -X GET \
+            "$API_BASE_URL/api/cron/sync-games" \
+            -H "Authorization: Bearer $CRON_SECRET"
+
+      - name: notify-sales
+        if: always()
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -fsS --max-time 300 -X GET \
+            "$API_BASE_URL/api/cron/notify-sales" \
+            -H "Authorization: Bearer $CRON_SECRET"
