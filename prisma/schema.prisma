@@ -140,6 +140,17 @@ model Game {
   lastSyncedAt   DateTime?
   lastSyncError  String?
 
+  /// Ofertas de chave (agregadas via GG.deals, regiao BR). Centavos.
+  keyRetailCents            Int?
+  keyKeyshopCents           Int?
+  keyHistoricalRetailCents  Int?
+  keyHistoricalKeyshopCents Int?
+  keyCurrency               String?
+  /// Pagina do GG.deals com todas as lojas.
+  keyDealsUrl               String?
+  keysLastSyncedAt          DateTime?
+  keysLastSyncError         String?
+
   items      WishlistItem[]
   saleEvents GameSaleEvent[]
 
@@ -149,6 +160,7 @@ model Game {
   @@index([onSale])
   @@index([releaseStatus])
   @@index([lastSyncedAt])
+  @@index([keysLastSyncedAt])
 }
 
 /// Registro de "jogo entrou em promocao" (ou baixou mais de preco enquanto em

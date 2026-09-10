@@ -52,6 +52,9 @@ export const notificationSettingsSchema = z.object({
   deliveryHour: z.coerce.number().int().min(0).max(23),
 });
 
+/** Param `[steamAppId]` das rotas de refresh de jogo. */
+export const steamAppIdParamSchema = z.coerce.number().int().positive().max(99_999_999);
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type CreateWishlistInput = z.infer<typeof createWishlistSchema>;

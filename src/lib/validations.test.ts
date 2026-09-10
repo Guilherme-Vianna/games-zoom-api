@@ -5,6 +5,7 @@ import {
   loginSchema,
   notificationSettingsSchema,
   registerSchema,
+  steamAppIdParamSchema,
   wishlistsQuerySchema,
 } from "./validations";
 
@@ -77,6 +78,17 @@ describe("itemsQuerySchema", () => {
 describe("wishlistsQuerySchema", () => {
   it("defaults", () => {
     expect(wishlistsQuerySchema.parse({})).toMatchObject({ page: 1, pageSize: 24 });
+  });
+});
+
+describe("steamAppIdParamSchema", () => {
+  it("coage string para int", () => {
+    expect(steamAppIdParamSchema.parse("367520")).toBe(367520);
+  });
+  it("rejeita zero, negativo e nao numero", () => {
+    expect(steamAppIdParamSchema.safeParse("0").success).toBe(false);
+    expect(steamAppIdParamSchema.safeParse("-1").success).toBe(false);
+    expect(steamAppIdParamSchema.safeParse("abc").success).toBe(false);
   });
 });
 

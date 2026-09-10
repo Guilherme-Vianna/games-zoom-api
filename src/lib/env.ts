@@ -49,6 +49,20 @@ export const env = {
   get gameCacheMaxAgeMs() {
     return numberEnv("GAME_CACHE_MAX_AGE_MS", 24 * 60 * 60 * 1000);
   },
+  /** GG.deals (ofertas de chave). Sem a key, a feature fica inerte (retorna null). */
+  get ggDealsApiKey() {
+    return process.env.GGDEALS_API_KEY ?? "";
+  },
+  get ggDealsRegion() {
+    return process.env.GGDEALS_REGION ?? "br";
+  },
+  get keysCacheMaxAgeMs() {
+    return numberEnv("KEYS_CACHE_MAX_AGE_MS", 6 * 60 * 60 * 1000);
+  },
+  /** Intervalo minimo entre refreshes sob demanda do mesmo Game. */
+  get refreshMinIntervalMs() {
+    return numberEnv("REFRESH_MIN_INTERVAL_MS", 60 * 1000);
+  },
   sendpulse: {
     get senderEmail() {
       return process.env.SENDPULSE_SENDER_EMAIL ?? "no-reply@localhost";

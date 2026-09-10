@@ -1,6 +1,7 @@
 import { mapWithConcurrency } from "@/lib/concurrency";
 import { env } from "@/lib/env";
 import { detectSaleTransition, mapSteamGameToFields } from "@/lib/game-mapping";
+import { refreshGameKeys } from "@/lib/keys/refresh-keys";
 import { prisma } from "@/lib/prisma";
 import { fetchSteamAppDetails } from "@/lib/steam";
 
@@ -9,6 +10,8 @@ export type SyncReport = {
   updated: number;
   failed: number;
   saleEvents: number;
+  keysRefreshed: number;
+  keysFailed: number;
   durationMs: number;
 };
 
@@ -45,7 +48,10 @@ export async function runGameSync(deps: SyncDeps = {}): Promise<SyncReport> {
   let updated = 0;
   let failed = 0;
   let saleEvents = 0;
+  let keysRefreshed = 0;
+  let keysFailed = 0;
   const batchSize = env.syncBatchSize;
+  const doKeys = !!env.ggDealsApiKey;
 
   for (let start = 0; start < games.length; start += batchSize) {
     const batch = games.slice(start, start + batchSize);
@@ -103,6 +109,13 @@ export async function runGameSync(deps: SyncDeps = {}): Promise<SyncReport> {
       if (o.sale) saleEvents++;
     }
 
+    // Ofertas de chave do lote (1 request / 100 jogos).
+    if (doKeys) {
+      const kr = await refreshGameKeys(batch.map((g) => g.id));
+      keysRefreshed += kr.refreshed;
+      keysFailed += kr.failed;
+    }
+
     // Respiro entre lotes para nao martelar a Steam.
     if (start + batchSize < games.length) {
       await new Promise((r) => setTimeout(r, 500 + Math.random() * 500));
@@ -115,6 +128,8 @@ export async function runGameSync(deps: SyncDeps = {}): Promise<SyncReport> {
     updated,
     failed,
     saleEvents,
+    keysRefreshed,
+    keysFailed,
     durationMs: finished.getTime() - started.getTime(),
   };
 
