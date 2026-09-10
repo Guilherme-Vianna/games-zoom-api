@@ -93,7 +93,9 @@ e-mail nao confirmado, 404, 409 conflito, 410 token expirado, 422 zod, 502 Steam
 | DELETE | `/wishlists/:id` | sim (dono) | Apaga a lista |
 | POST | `/wishlists/:id/items` | sim (dono/colab) | `{ input }` = link/AppID Steam **ou** nomes separados por virgula/quebra de linha -> resolve cada um (upsert em `Game`) e salva. 201 `{ added: Item[], skipped: [{term, reason}] }` |
 | GET/PUT | `/me/notification-settings` | sim | Le/grava `{ saleDigestEnabled, deliveryHour }` |
-| GET | `/cron/sync-games` | Bearer `$CRON_SECRET` | Job horario: atualiza o cache `Game` |
+| POST | `/games/:steamAppId/refresh` | sim | Atualiza 1 jogo agora (Steam + chaves). Guarda de staleness. `{ game }` |
+| POST | `/wishlists/:id/refresh` | sim (membro) | Atualiza a lista (todas as chaves + ≤40 jogos na Steam). `{ keysRefreshed, steamRefreshed, steamPending, ... }` |
+| GET | `/cron/sync-games` | Bearer `$CRON_SECRET` | Job horario: atualiza o cache `Game` (+ chaves via GG.deals) |
 | GET | `/cron/notify-sales` | Bearer `$CRON_SECRET` | Job horario: digest de promocoes |
 | DELETE | `/wishlists/:id/items/:itemId` | sim (dono ou autor) | Remove o item |
 | GET | `/wishlists/:id/invites` | sim (dono) | Lista os links de convite |
@@ -142,6 +144,39 @@ e-mail nao confirmado, 404, 409 conflito, 410 token expirado, 422 zod, 502 Steam
 - Mapeamento puro em `src/lib/game-mapping.ts`: `mapSteamGameToFields`, `deriveGameStatus`,
   `detectSaleTransition` (dispara `GameSaleEvent` ao entrar em promocao ou aprofundar o
   desconto). Tudo testado.
+
+## Ofertas de chave (GG.deals)
+
+- O `Game` guarda tambem as ofertas de **chave** (keyshops de terceiros), agregadas via
+  **GG.deals** (`api.gg.deals/v1/prices/by-steam-app-id/?ids=<csv,≤100>&region=br&key=<GGDEALS_API_KEY>`).
+  Campos: `keyRetailCents` (menor loja oficial), `keyKeyshopCents` (menor revendedor),
+  `keyHistoricalRetail/KeyshopCents`, `keyCurrency`, `keyDealsUrl` (pagina do GG.deals com
+  todas as lojas), `keysLastSyncedAt`, `keysLastSyncError`.
+- `region=br` -> precos em BRL e keyshops relevantes para o Brasil (o GG.deals ja filtra
+  keys nao ativaveis na regiao). O tier gratis da API **nao** quebra por loja — o link
+  `keyDealsUrl` cobre isso. A conta GG.deals precisa ter **e-mail confirmado** (senao a API
+  responde `success:false` "confirm your email").
+- `src/lib/keys/`: `KeyPriceProvider` (interface — permite somar/trocar provedores),
+  `GGDealsProvider` + `parseGGDealsResponse` (puro, testado), `decimalStringToCents` (puro,
+  testado — `"24.30"`→2430), `refreshGameKeys(gameIds)` (nunca lanca; em erro grava
+  `keysLastSyncError` e segue). Sem `GGDEALS_API_KEY` -> provider retorna tudo `null`,
+  feature fica inerte.
+- `refreshGameKeys` e reusado pelo cron `sync-games` (1 request/100 jogos por batch) e
+  pelas rotas de refresh sob demanda.
+
+## Refresh sob demanda
+
+- **`POST /api/games/:steamAppId/refresh`** — `requireUser` (qualquer usuario confirmado;
+  `Game` e compartilhado e publico). Atualiza Steam + chaves de um jogo agora. **Guarda de
+  staleness** `REFRESH_MIN_INTERVAL_MS` (60s): se ambos frescos, devolve o cache sem rede.
+  `maxDuration = 30`. Resposta `{ game: serializeGame(...), skipped }`.
+- **`POST /api/wishlists/:id/refresh`** — `requireUser` + `assertCanView` (qualquer membro).
+  Atualiza **todas** as chaves da lista (barato) + a fatia mais desatualizada contra a Steam
+  (**cap 40 jogos/clique**, concorrencia `SYNC_CONCURRENCY`, stalest-first). `maxDuration = 60`.
+  Resposta `{ keysRefreshed, keysFailed, steamRefreshed, steamFailed, steamPending }`
+  (`steamPending` = ficaram fora do cap; a UI pede novo clique).
+- `refreshGameFromSteam(gameId)` (`src/lib/game-repo.ts`) forca a Steam ignorando `maxAge`.
+- Como o `Game` e compartilhado, 1 refresh serve todas as listas que contem o jogo.
 
 ## Jobs / Cron
 
@@ -198,8 +233,12 @@ e-mail nao confirmado, 404, 409 conflito, 410 token expirado, 422 zod, 502 Steam
 - Fan-out de e-mail: `notify-sales` horario so toca usuarios com `deliveryHour` == hora
   atual e opt-in; 1 digest por usuario; try/catch por usuario; ledger idempotente;
   mandar em chunks se preciso respeitar throughput do SendPulse.
-- Indices: `Game.onSale`, `Game.releaseStatus`, `Game.lastSyncedAt`, `WishlistItem.gameId`,
-  `GameSaleEvent.notifiedAt`, `GameSaleEvent.detectedAt`, `GameSaleNotification[userId,gameSaleEventId]`.
+- Indices: `Game.onSale`, `Game.releaseStatus`, `Game.lastSyncedAt`, `Game.keysLastSyncedAt`,
+  `WishlistItem.gameId`, `GameSaleEvent.notifiedAt`, `GameSaleEvent.detectedAt`,
+  `GameSaleNotification[userId,gameSaleEventId]`.
+- Ofertas de chave: `refreshGameKeys` = 1 request GG.deals / 100 jogos; cache
+  `KEYS_CACHE_MAX_AGE_MS` (6h); refresh sob demanda com guarda `REFRESH_MIN_INTERVAL_MS`.
+  Refresh da lista limita a Steam a 40 jogos/clique (chaves = todas, baratas).
 - Cache: **so no banco** — a tabela `Game` e o cache da Steam (evita request por
   item) e os indices cobrem as queries de listagem. Nada de `unstable_cache` nas rotas
   (serializa o retorno e vira uma fonte de bug — os `Date` do Prisma viram string).
@@ -253,8 +292,10 @@ e-mail nao confirmado, 404, 409 conflito, 410 token expirado, 422 zod, 502 Steam
   **verificar os dados** (`pg_dump` + contagem de orfaos = 0) e so entao deployar (3).
   Na escala atual as 3 rodam juntas no `migrate deploy` — a guarda da migration (2) aborta
   se o backfill ficou incompleto.
-- Env: `CRON_SECRET` (obrigatoria). Opcionais de tuning do sync: `SYNC_CONCURRENCY`,
-  `SYNC_BATCH_SIZE`, `MAX_GAMES_PER_SYNC`, `GAME_CACHE_MAX_AGE_MS`, `APP_TIMEZONE`.
+- Env: `CRON_SECRET` (obrigatoria). Ofertas de chave: `GGDEALS_API_KEY` (opcional — sem ela
+  a feature fica inerte), `GGDEALS_REGION` (`br`), `KEYS_CACHE_MAX_AGE_MS` (6h),
+  `REFRESH_MIN_INTERVAL_MS` (60s). Tuning do sync: `SYNC_CONCURRENCY`, `SYNC_BATCH_SIZE`,
+  `MAX_GAMES_PER_SYNC`, `GAME_CACHE_MAX_AGE_MS`, `APP_TIMEZONE`.
 - `pnpm db:seed` cria `demo@games-zoom.local` / `gameszoom123` (ja verificado).
 
 ## Deploy na Vercel

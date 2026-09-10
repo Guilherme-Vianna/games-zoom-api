@@ -1,5 +1,6 @@
 import type { SteamPriceOverview } from "@/lib/steam";
 import { deriveGameStatus } from "@/lib/game-mapping";
+import { formatCentsBRL } from "@/lib/keys/decimal-cents";
 import { inviteState } from "@/lib/tokens";
 
 export type GameRow = {
@@ -15,7 +16,32 @@ export type GameRow = {
   onSale: boolean;
   currency: string;
   lastSyncedAt: Date | null;
+  keyRetailCents?: number | null;
+  keyKeyshopCents?: number | null;
+  keyHistoricalRetailCents?: number | null;
+  keyHistoricalKeyshopCents?: number | null;
+  keyCurrency?: string | null;
+  keyDealsUrl?: string | null;
+  keysLastSyncedAt?: Date | null;
 };
+
+type KeyOffer = { cents: number; formatted: string } | null;
+
+function keyOffer(cents: number | null | undefined): KeyOffer {
+  if (cents == null) return null;
+  return { cents, formatted: formatCentsBRL(cents) ?? `R$ ${(cents / 100).toFixed(2)}` };
+}
+
+/** Campos de oferta de chave (compartilhados entre serializeItem e serializeGame). */
+function keyFields(game: GameRow) {
+  return {
+    keyRetail: keyOffer(game.keyRetailCents),
+    keyKeyshop: keyOffer(game.keyKeyshopCents),
+    keyHistoricalKeyshop: keyOffer(game.keyHistoricalKeyshopCents),
+    keyDealsUrl: game.keyDealsUrl ?? null,
+    keysLastSyncedAt: game.keysLastSyncedAt?.toISOString() ?? null,
+  };
+}
 
 type ItemRow = {
   id: string;
@@ -87,9 +113,28 @@ export function serializeItem(item: ItemRow) {
     discountPercent: game.discountPercent,
     status: deriveGameStatus(game),
     lastSyncedAt: game.lastSyncedAt?.toISOString() ?? null,
+    ...keyFields(game),
     addedById: item.addedById,
     addedByName: item.addedByName,
     createdAt: item.createdAt.toISOString(),
+  };
+}
+
+/** Detalhe de um Game sem os campos de item — resposta das rotas de refresh. */
+export function serializeGame(game: GameRow) {
+  return {
+    steamAppId: game.steamAppId,
+    title: game.title,
+    imageUrl: game.imageUrl,
+    storeUrl: game.storeUrl,
+    isFree: game.isFree,
+    priceOverview: priceOverviewFromGame(game),
+    releaseStatus: game.releaseStatus,
+    onSale: game.onSale,
+    discountPercent: game.discountPercent,
+    status: deriveGameStatus(game),
+    lastSyncedAt: game.lastSyncedAt?.toISOString() ?? null,
+    ...keyFields(game),
   };
 }
 

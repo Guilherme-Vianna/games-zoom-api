@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { serializeItem, serializeWishlist, type GameRow } from "./serialize";
+import { serializeGame, serializeItem, serializeWishlist, type GameRow } from "./serialize";
 
 const game: GameRow = {
   steamAppId: 367520,
@@ -61,6 +61,32 @@ describe("serializeItem", () => {
   it("status unreleased para jogo nao lancado", () => {
     const s = serializeItem({ ...item, game: { ...game, releaseStatus: "unreleased" } });
     expect(s.status).toBe("unreleased");
+  });
+
+  it("ofertas de chave: null quando ausentes, formatadas quando presentes", () => {
+    expect(serializeItem(item)).toMatchObject({ keyKeyshop: null, keyRetail: null, keyDealsUrl: null });
+    const withKeys = serializeItem({
+      ...item,
+      game: {
+        ...game,
+        keyKeyshopCents: 1399,
+        keyHistoricalKeyshopCents: 950,
+        keyDealsUrl: "https://gg.deals/game/hollow-knight/",
+        keysLastSyncedAt: new Date("2026-09-11T00:00:00Z"),
+      },
+    });
+    expect(withKeys.keyKeyshop).toEqual({ cents: 1399, formatted: "R$ 13,99" });
+    expect(withKeys.keyHistoricalKeyshop).toEqual({ cents: 950, formatted: "R$ 9,50" });
+    expect(withKeys.keyDealsUrl).toBe("https://gg.deals/game/hollow-knight/");
+    expect(withKeys.keysLastSyncedAt).toBe("2026-09-11T00:00:00.000Z");
+  });
+});
+
+describe("serializeGame", () => {
+  it("traz os campos do jogo + ofertas de chave, sem campos de item", () => {
+    const s = serializeGame({ ...game, keyKeyshopCents: 500 });
+    expect(s).toMatchObject({ steamAppId: 367520, status: "onSale", keyKeyshop: { cents: 500 } });
+    expect(s).not.toHaveProperty("addedById");
   });
 });
 

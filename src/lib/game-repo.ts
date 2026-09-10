@@ -42,3 +42,33 @@ export async function findOrCreateGameForAppId(
 
   return upsertGameFromSteam(steamGame);
 }
+
+/**
+ * Forca a atualizacao de um `Game` contra a Steam agora (ignora `lastSyncedAt`).
+ * Usado pelo refresh sob demanda (modal / botao da lista). Em erro da Steam,
+ * grava `lastSyncError` e devolve a linha atual sem quebrar.
+ */
+export async function refreshGameFromSteam(
+  gameId: string,
+  opts: { fetchImpl?: typeof fetch } = {},
+): Promise<NonNullable<GameModel>> {
+  const game = await prisma.game.findUnique({ where: { id: gameId } });
+  if (!game) throw new Error(`Game ${gameId} nao encontrado`);
+
+  try {
+    const steamGame = await fetchSteamAppDetails(game.steamAppId, opts.fetchImpl ?? fetch);
+    if (!steamGame) {
+      return prisma.game.update({
+        where: { id: gameId },
+        data: { lastSyncedAt: new Date(), lastSyncError: "Steam: appid nao encontrado" },
+      });
+    }
+    return await upsertGameFromSteam(steamGame);
+  } catch (err) {
+    console.error("[refresh-steam] falhou para", game.steamAppId, err);
+    return prisma.game.update({
+      where: { id: gameId },
+      data: { lastSyncError: String((err as Error)?.message ?? err).slice(0, 300) },
+    });
+  }
+}
