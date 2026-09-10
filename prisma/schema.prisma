@@ -1,0 +1,113 @@
+// Games Zoom - API. Prisma 7 + Neon Postgres (driver adapter @prisma/adapter-pg).
+// learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  password      String
+  // null enquanto o email nao foi confirmado; data da confirmacao quando ok.
+  emailVerified DateTime?
+
+  verificationTokens VerificationToken[]
+  wishlists          Wishlist[]             @relation("WishlistOwner")
+  collaborations     WishlistCollaborator[]
+  addedItems         WishlistItem[]         @relation("WishlistItemAuthor")
+  createdInvites     WishlistInvite[]       @relation("WishlistInviteAuthor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Token de confirmacao de email (single-use, expira).
+model VerificationToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Wishlist {
+  id      String @id @default(cuid())
+  name    String
+  ownerId String
+  owner   User   @relation("WishlistOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  collaborators WishlistCollaborator[]
+  items         WishlistItem[]
+  invites       WishlistInvite[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+}
+
+/// Pessoa que entrou numa lista pelo link compartilhado.
+model WishlistCollaborator {
+  id         String   @id @default(cuid())
+  wishlistId String
+  wishlist   Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([wishlistId, userId])
+  @@index([userId])
+}
+
+/// Link de convite para uma lista. Pode expirar e pode ser revogado.
+model WishlistInvite {
+  id          String    @id @default(cuid())
+  wishlistId  String
+  wishlist    Wishlist  @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  token       String    @unique
+  createdById String
+  createdBy   User      @relation("WishlistInviteAuthor", fields: [createdById], references: [id])
+  /// null = nunca expira
+  expiresAt   DateTime?
+  /// preenchido quando o dono revoga o link
+  revokedAt   DateTime?
+  /// quantas pessoas entraram por este link (informativo)
+  useCount    Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  @@index([wishlistId])
+}
+
+model WishlistItem {
+  id          String   @id @default(cuid())
+  wishlistId  String
+  wishlist    Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  steamAppId  Int
+  title       String
+  imageUrl    String?
+  storeUrl    String
+  isFree      Boolean  @default(false)
+  /// Snapshot do price_overview da Steam no momento em que o jogo foi adicionado.
+  priceOverview Json?
+
+  addedById   String
+  addedBy     User     @relation("WishlistItemAuthor", fields: [addedById], references: [id])
+  addedByName String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([wishlistId, steamAppId])
+  @@index([wishlistId])
+}

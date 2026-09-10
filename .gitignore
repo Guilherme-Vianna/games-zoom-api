@@ -1,0 +1,22 @@
+# dependencies
+/node_modules
+
+# next
+/.next/
+/out/
+next-env.d.ts
+
+# prisma generated client
+/src/generated
+
+# env
+.env
+.env*.local
+
+# misc
+.DS_Store
+*.log
+/coverage
+
+# typescript build info
+*.tsbuildinfo
