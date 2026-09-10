@@ -238,9 +238,10 @@ e-mail nao confirmado, 404, 409 conflito, 410 token expirado, 422 zod, 502 Steam
   nao passam pelo pooler do Neon (P1002).
 - `DATABASE_URL` (com `-pooler`) e o que a app usa em runtime.
 - **Migrations rodam automaticamente**: os scripts `dev` e `build` fazem
-  `prisma generate && prisma migrate deploy` antes de subir/buildar. No dev isso
-  aplica migrations pendentes ao abrir; na Vercel o `build` aplica em producao — sem
-  passo manual. Para **criar** uma migration nova: `pnpm db:migrate` (= `prisma
+  `prisma generate && node scripts/migrate-deploy.mjs` antes de subir/buildar. O
+  script so roda `prisma migrate deploy` quando ha `DIRECT_URL`/`DATABASE_URL` no
+  ambiente — previews da Vercel sem banco buildam normalmente (a migration e pulada).
+  Para migrar em previews, marcar essas env vars tambem como *Preview* na Vercel. Para **criar** uma migration nova: `pnpm db:migrate` (= `prisma
   migrate dev`), commitar a pasta gerada em `prisma/migrations/`.
 - Antes de qualquer migration destrutiva (`DROP`/`ALTER` de coluna) contra producao:
   `pg_dump` da `DIRECT_URL` primeiro e rodar `prisma migrate status`.
