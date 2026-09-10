@@ -80,7 +80,7 @@ e-mail nao confirmado, 404, 409 conflito, 410 token expirado, 422 zod, 502 Steam
 | POST | `/wishlists` | sim | `{ name }` -> cria lista + 1 convite padrao (sem expiracao) |
 | GET | `/wishlists/:id` | sim | Detalhe (itens, colaboradores, `access`; `invites` so p/ dono) |
 | DELETE | `/wishlists/:id` | sim (dono) | Apaga a lista |
-| POST | `/wishlists/:id/items` | sim (dono/colab) | `{ input }` = link Steam ou AppID -> busca na Steam e salva |
+| POST | `/wishlists/:id/items` | sim (dono/colab) | `{ input }` = link/AppID Steam **ou** nomes separados por virgula/quebra de linha -> resolve cada um e salva. 201 `{ added: Item[], skipped: [{term, reason}] }` |
 | DELETE | `/wishlists/:id/items/:itemId` | sim (dono ou autor) | Remove o item |
 | GET | `/wishlists/:id/invites` | sim (dono) | Lista os links de convite |
 | POST | `/wishlists/:id/invites` | sim (dono) | `{ expiry: "1d"\|"7d"\|"30d"\|"never" }` -> gera link |
@@ -117,6 +117,15 @@ e-mail nao confirmado, 404, 409 conflito, 410 token expirado, 422 zod, 502 Steam
 - `parseSteamAppId(input)` (`src/lib/steam.ts`) aceita AppID puro, link da loja
   (com/sem querystring de rastreio, com/sem protocolo) e link da comunidade. Retorna
   `null` para qualquer coisa ambigua — **nunca** capturar `/app/<id>` de dominio nao-Steam.
+- **Adicionar por nome**: `parseAddItemsInput(input)` (`src/lib/add-items-input.ts`, puro
+  + testado) quebra o campo em entradas (link/AppID ou nome livre) — sem separador vira
+  1 entrada; com virgula/`;`/quebra de linha vira lista, com dedupe por AppID e por nome
+  normalizado. Teto `MAX_ADD_ENTRIES` (30). Para nomes, `fetchSteamAppIdByName(term)`
+  chama o `storesearch` publico e `pickBestSearchMatch(raw, term)` escolhe o AppID
+  (nome normalizado exato > 1o `type:"app"` da lista; a Steam ja ordena por relevancia).
+- O route `items` resolve as entradas em paralelo e responde 201
+  `{ added: Item[], skipped: [{term, reason: "duplicate"|"not_found"|"steam_error"}] }`.
+  Se nada foi adicionado: 409 (so duplicados), 502 (algum steam_error) ou 404.
 - `mapAppDetails(raw, appId)` converte a resposta do endpoint publico `appdetails`
   (`?cc=br&l=brazilian`) no nosso shape; retorna `null` quando `success: false`.
 - O `priceOverview` salvo em `WishlistItem` e um **snapshot** do momento em que o jogo

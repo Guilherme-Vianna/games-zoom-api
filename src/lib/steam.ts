@@ -45,6 +45,69 @@ export function steamAppDetailsUrl(appId: number): string {
   return `https://store.steampowered.com/api/appdetails?appids=${appId}&cc=br&l=brazilian`;
 }
 
+/** Endpoint publico de busca da loja por termo livre (nome do jogo). */
+export function steamStoreSearchUrl(term: string): string {
+  return `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(
+    term,
+  )}&cc=br&l=brazilian`;
+}
+
+type RawStoreSearch = {
+  items?: Array<{ type?: string; name?: string; id?: number } | null | undefined>;
+};
+
+/** Normaliza um titulo para comparacao: sem acento, sem pontuacao, caixa baixa, espaco unico. */
+export function normalizeTitle(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Escolhe o melhor AppID da resposta do `storesearch` para um termo digitado:
+ *  - prioriza o item `type: "app"` cujo nome normalizado bate exatamente com o termo;
+ *  - senao, o primeiro `type: "app"` da lista (a Steam ja ordena por relevancia).
+ * Retorna `null` quando nao ha nenhum app utilizavel.
+ */
+export function pickBestSearchMatch(raw: unknown, term: string): number | null {
+  const items = (raw as RawStoreSearch | null)?.items;
+  if (!Array.isArray(items)) return null;
+
+  const apps = items.filter(
+    (it): it is { type?: string; name?: string; id: number } =>
+      !!it && typeof it.id === "number" && it.id > 0 && (it.type ?? "app") === "app",
+  );
+  if (apps.length === 0) return null;
+
+  const wanted = normalizeTitle(term);
+  const exact = apps.find((it) => normalizeTitle(it.name ?? "") === wanted);
+  return (exact ?? apps[0]).id;
+}
+
+/**
+ * Busca na loja da Steam pelo nome e devolve o AppID do melhor match.
+ * Lanca em erro de rede/HTTP; retorna `null` quando a busca nao acha nada.
+ */
+export async function fetchSteamAppIdByName(
+  term: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<number | null> {
+  const res = await fetchImpl(steamStoreSearchUrl(term), {
+    headers: { Accept: "application/json" },
+    next: { revalidate: 60 * 30 },
+  } as RequestInit);
+
+  if (!res.ok) {
+    throw new Error(`Steam storesearch respondeu ${res.status}`);
+  }
+
+  const json = (await res.json()) as unknown;
+  return pickBestSearchMatch(json, term);
+}
+
 export type SteamPriceOverview = {
   currency: string;
   initial: number;
