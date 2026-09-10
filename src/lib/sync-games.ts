@@ -1,4 +1,3 @@
-import { revalidateTag } from "next/cache";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import { env } from "@/lib/env";
 import { detectSaleTransition, mapSteamGameToFields } from "@/lib/game-mapping";
@@ -128,8 +127,6 @@ export async function runGameSync(deps: SyncDeps = {}): Promise<SyncReport> {
       meta: report,
     },
   });
-
-  if (saleEvents > 0) revalidateTag("wishlist-items", "max");
 
   return report;
 }

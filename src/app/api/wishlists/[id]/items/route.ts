@@ -1,4 +1,3 @@
-import { revalidateTag, unstable_cache } from "next/cache";
 import { requireUser } from "@/lib/auth-context";
 import { error, handle, HttpError, json } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
@@ -28,28 +27,20 @@ export const GET = handle(async (req, ctx) => {
   const query = itemsQuerySchema.parse(Object.fromEntries(url.searchParams));
   const { page, pageSize, skip, take } = parsePageParams(query);
 
-  const cacheKey = ["wishlist-items", id, JSON.stringify(query)];
-  const load = unstable_cache(
-    async () => {
-      const where = buildItemsWhere({ wishlistId: id, status: query.status, q: query.q });
-      const [rows, total, counts] = await Promise.all([
-        prisma.wishlistItem.findMany({
-          where,
-          orderBy: buildItemsOrderBy(query.sort),
-          skip,
-          take,
-          include: { game: true },
-        }),
-        prisma.wishlistItem.count({ where }),
-        loadWishlistCounts(id, query.q),
-      ]);
-      return { rows, total, counts };
-    },
-    cacheKey,
-    { tags: [`wishlist:${id}`, "wishlist-items"], revalidate: 300 },
-  );
-
-  const { rows, total, counts } = await load();
+  // Sem cache de resposta aqui: o cache que importa e a tabela `Game` (evita
+  // request na Steam por item) + os indices. Sao 3 queries indexadas.
+  const where = buildItemsWhere({ wishlistId: id, status: query.status, q: query.q });
+  const [rows, total, counts] = await Promise.all([
+    prisma.wishlistItem.findMany({
+      where,
+      orderBy: buildItemsOrderBy(query.sort),
+      skip,
+      take,
+      include: { game: true },
+    }),
+    prisma.wishlistItem.count({ where }),
+    loadWishlistCounts(id, query.q),
+  ]);
 
   return json({
     items: rows.map(serializeItem),
@@ -160,9 +151,6 @@ export const POST = handle(async (req, ctx) => {
     include: { game: true },
     orderBy: { createdAt: "desc" },
   });
-
-  revalidateTag(`wishlist:${id}`, "max");
-  revalidateTag("wishlist-items", "max");
 
   return json({ added: added.map(serializeItem), skipped }, { status: 201 });
 });

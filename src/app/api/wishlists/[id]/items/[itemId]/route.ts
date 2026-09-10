@@ -1,4 +1,3 @@
-import { revalidateTag } from "next/cache";
 import { requireUser } from "@/lib/auth-context";
 import { handle, HttpError, json } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
@@ -24,7 +23,5 @@ export const DELETE = handle(async (req, ctx) => {
   }
 
   await prisma.wishlistItem.delete({ where: { id: itemId } });
-  revalidateTag(`wishlist:${id}`, "max");
-  revalidateTag("wishlist-items", "max");
   return json({ ok: true });
 });

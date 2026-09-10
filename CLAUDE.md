@@ -200,9 +200,10 @@ e-mail nao confirmado, 404, 409 conflito, 410 token expirado, 422 zod, 502 Steam
   mandar em chunks se preciso respeitar throughput do SendPulse.
 - Indices: `Game.onSale`, `Game.releaseStatus`, `Game.lastSyncedAt`, `WishlistItem.gameId`,
   `GameSaleEvent.notifiedAt`, `GameSaleEvent.detectedAt`, `GameSaleNotification[userId,gameSaleEventId]`.
-- Cache de leitura: `unstable_cache` (tags `wishlist:${id}`, `wishlist-items`,
-  `revalidate: 300`) em `GET /wishlists/:id/items`; invalidado nas mutacoes de item
-  (`revalidateTag(tag, "max")`) e pelo `sync-games` quando ha `GameSaleEvent`.
+- Cache: **so no banco** — a tabela `Game` e o cache da Steam (evita request por
+  item) e os indices cobrem as queries de listagem. Nada de `unstable_cache` nas rotas
+  (serializa o retorno e vira uma fonte de bug — os `Date` do Prisma viram string).
+  Se um dia precisar de cache de resposta, usar `CacheEntry` (banco) ou `Cache-Control`.
 
 ## Steam
 
