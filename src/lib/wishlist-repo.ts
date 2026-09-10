@@ -1,8 +1,9 @@
 import { HttpError } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
+import type { ItemStatusCounts } from "@/lib/serialize";
 import { resolveWishlistAccess, type WishlistAccess } from "@/lib/wishlist-access";
 
-const fullInclude = {
+const baseInclude = {
   owner: { select: { name: true } },
   collaborators: {
     include: { user: { select: { name: true, email: true } } },
@@ -12,14 +13,28 @@ const fullInclude = {
     include: { createdBy: { select: { name: true } } },
     orderBy: { createdAt: "desc" as const },
   },
-  items: { orderBy: { createdAt: "desc" as const } },
+  _count: { select: { items: true } },
 } as const;
 
-/** Carrega a lista com itens/colaboradores/convites e resolve o acesso do usuario. */
-export async function loadWishlistForUser(wishlistId: string, userId: string | null) {
+/**
+ * Carrega a lista (colaboradores/convites/contagem) e resolve o acesso do
+ * usuario. Por padrao **nao** traz os itens — eles vem paginados por
+ * `GET /wishlists/:id/items`. Passe `{ withItems: true }` só quando precisar
+ * de todos (ex.: previa de convite, com `take` proprio no caller).
+ */
+export async function loadWishlistForUser(
+  wishlistId: string,
+  userId: string | null,
+  opts: { withItems?: boolean } = {},
+) {
   const wishlist = await prisma.wishlist.findUnique({
     where: { id: wishlistId },
-    include: fullInclude,
+    include: opts.withItems
+      ? {
+          ...baseInclude,
+          items: { orderBy: { createdAt: "desc" as const }, include: { game: true } },
+        }
+      : baseInclude,
   });
   if (!wishlist) throw new HttpError("Lista nao encontrada", 404);
 
@@ -30,6 +45,37 @@ export async function loadWishlistForUser(wishlistId: string, userId: string | n
   });
 
   return { wishlist, access };
+}
+
+/** Contagem de itens por bucket de status (para os badges das abas). */
+export async function loadWishlistCounts(
+  wishlistId: string,
+  q?: string | null,
+): Promise<ItemStatusCounts> {
+  const term = q?.trim();
+  const titleFilter = term
+    ? { title: { contains: term, mode: "insensitive" as const } }
+    : {};
+
+  const [onSale, unreleased, regular] = await Promise.all([
+    prisma.wishlistItem.count({
+      where: {
+        wishlistId,
+        game: { releaseStatus: "released", discountPercent: { gt: 0 }, ...titleFilter },
+      },
+    }),
+    prisma.wishlistItem.count({
+      where: { wishlistId, game: { releaseStatus: "unreleased", ...titleFilter } },
+    }),
+    prisma.wishlistItem.count({
+      where: {
+        wishlistId,
+        game: { releaseStatus: "released", discountPercent: 0, ...titleFilter },
+      },
+    }),
+  ]);
+
+  return { onSale, unreleased, regular };
 }
 
 export function assertCanView(access: WishlistAccess) {

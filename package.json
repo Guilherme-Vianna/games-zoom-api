@@ -5,8 +5,8 @@
   "packageManager": "pnpm@10.28.1",
   "scripts": {
     "postinstall": "prisma generate",
-    "dev": "prisma generate && prisma migrate deploy && next dev --port 3001",
-    "build": "prisma generate && prisma migrate deploy && next build",
+    "dev": "prisma generate && node scripts/migrate-deploy.mjs && next dev --port 3001",
+    "build": "prisma generate && node scripts/migrate-deploy.mjs && next build",
     "start": "next start --port 3001",
     "lint": "eslint",
     "test": "vitest run",

@@ -148,6 +148,7 @@ describe("mapAppDetails", () => {
       imageUrl: "https://cdn.steam/730/header.jpg",
       storeUrl: "https://store.steampowered.com/app/730/",
       isFree: false,
+      releaseStatus: "released",
       priceOverview: {
         currency: "BRL",
         initial: 3699,
@@ -191,5 +192,15 @@ describe("mapAppDetails", () => {
   it("normaliza header_image ausente para null", () => {
     const raw = { "730": { success: true, data: { name: "Jogo" } } };
     expect(mapAppDetails(raw, appId)?.imageUrl).toBeNull();
+  });
+
+  it("marca releaseStatus unreleased quando release_date.coming_soon", () => {
+    const raw = {
+      "730": {
+        success: true,
+        data: { name: "Jogo", release_date: { coming_soon: true, date: "Em breve" } },
+      },
+    };
+    expect(mapAppDetails(raw, appId)?.releaseStatus).toBe("unreleased");
   });
 });

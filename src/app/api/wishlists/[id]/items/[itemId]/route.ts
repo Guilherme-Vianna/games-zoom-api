@@ -1,3 +1,4 @@
+import { revalidateTag } from "next/cache";
 import { requireUser } from "@/lib/auth-context";
 import { handle, HttpError, json } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
@@ -12,7 +13,10 @@ export const DELETE = handle(async (req, ctx) => {
   const { wishlist, access } = await loadWishlistForUser(id, user.id);
   if (!access.canView) throw new HttpError("Sem acesso a esta lista", 403);
 
-  const item = wishlist.items.find((i) => i.id === itemId);
+  const item = await prisma.wishlistItem.findFirst({
+    where: { id: itemId, wishlistId: id },
+    select: { id: true, addedById: true },
+  });
   if (!item) throw new HttpError("Item nao encontrado", 404);
 
   if (!canRemoveItem({ ownerId: wishlist.ownerId, itemAuthorId: item.addedById, userId: user.id })) {
@@ -20,5 +24,7 @@ export const DELETE = handle(async (req, ctx) => {
   }
 
   await prisma.wishlistItem.delete({ where: { id: itemId } });
+  revalidateTag(`wishlist:${id}`, "max");
+  revalidateTag("wishlist-items", "max");
   return json({ ok: true });
 });

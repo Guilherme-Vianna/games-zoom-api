@@ -10,6 +10,11 @@ datasource db {
   provider = "postgresql"
 }
 
+enum GameReleaseStatus {
+  released
+  unreleased
+}
+
 model User {
   id            String    @id @default(cuid())
   name          String
@@ -23,6 +28,8 @@ model User {
   collaborations     WishlistCollaborator[]
   addedItems         WishlistItem[]         @relation("WishlistItemAuthor")
   createdInvites     WishlistInvite[]       @relation("WishlistInviteAuthor")
+  notificationSettings UserNotificationSettings?
+  saleNotifications    GameSaleNotification[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -93,13 +100,12 @@ model WishlistItem {
   id          String   @id @default(cuid())
   wishlistId  String
   wishlist    Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  /// AppID da Steam — redundante com Game.steamAppId, mas alimenta o unique abaixo
+  /// e permite dedupe rapido sem join.
   steamAppId  Int
-  title       String
-  imageUrl    String?
-  storeUrl    String
-  isFree      Boolean  @default(false)
-  /// Snapshot do price_overview da Steam no momento em que o jogo foi adicionado.
-  priceOverview Json?
+  /// O jogo compartilhado (cache da Steam). Varias listas referenciam a mesma linha.
+  gameId      String
+  game        Game     @relation(fields: [gameId], references: [id], onDelete: Restrict)
 
   addedById   String
   addedBy     User     @relation("WishlistItemAuthor", fields: [addedById], references: [id])
@@ -110,4 +116,105 @@ model WishlistItem {
 
   @@unique([wishlistId, steamAppId])
   @@index([wishlistId])
+  @@index([gameId])
+}
+
+/// Jogo da Steam — entidade global compartilhada, 1 linha por steamAppId.
+/// Funciona como cache da Steam no proprio banco (sem Redis): o job horario
+/// `sync-games` atualiza estas linhas; as listas so referenciam.
+model Game {
+  id             String            @id @default(cuid())
+  steamAppId     Int               @unique
+  title          String
+  imageUrl       String?
+  storeUrl       String
+  isFree         Boolean           @default(false)
+  releaseStatus  GameReleaseStatus @default(released)
+  /// Preco em centavos (price_overview da Steam). null quando indisponivel.
+  priceInitial   Int?
+  priceFinal     Int?
+  discountPercent Int              @default(0)
+  onSale         Boolean           @default(false)
+  currency       String            @default("BRL")
+  /// null = nunca sincronizado (forca o proximo job a reconciliar).
+  lastSyncedAt   DateTime?
+  lastSyncError  String?
+
+  items      WishlistItem[]
+  saleEvents GameSaleEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([onSale])
+  @@index([releaseStatus])
+  @@index([lastSyncedAt])
+}
+
+/// Registro de "jogo entrou em promocao" (ou baixou mais de preco enquanto em
+/// promocao). Criado pelo job `sync-games`; consumido pelo digest `notify-sales`.
+model GameSaleEvent {
+  id              String   @id @default(cuid())
+  gameId          String
+  game            Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  prevFinal       Int?
+  newFinal        Int
+  discountPercent Int
+  detectedAt      DateTime @default(now())
+  /// Marcador de "envelhecido / encerrado" (TTL sweep). A entrega por usuario e
+  /// autoritativa via GameSaleNotification.
+  notifiedAt      DateTime?
+
+  notifications GameSaleNotification[]
+
+  @@index([gameId])
+  @@index([notifiedAt])
+  @@index([detectedAt])
+}
+
+/// Ledger de entrega: cada usuario recebe um evento no maximo uma vez, na hora
+/// que ele configurou.
+model GameSaleNotification {
+  id              String        @id @default(cuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gameSaleEventId String
+  gameSaleEvent   GameSaleEvent @relation(fields: [gameSaleEventId], references: [id], onDelete: Cascade)
+  sentAt          DateTime      @default(now())
+
+  @@unique([userId, gameSaleEventId])
+  @@index([userId])
+}
+
+/// Preferencias de notificacao por usuario. Digest de promocao e opt-in.
+model UserNotificationSettings {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  saleDigestEnabled Boolean  @default(false)
+  /// Hora do dia 0-23, interpretada em America/Sao_Paulo.
+  deliveryHour      Int      @default(9)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Estado de execucao dos jobs (ultima rodada, status, metricas).
+model JobRun {
+  id             String    @id @default(cuid())
+  jobName        String    @unique
+  lastStartedAt  DateTime?
+  lastFinishedAt DateTime?
+  lastStatus     String?
+  lastError      String?
+  meta           Json?
+  updatedAt      DateTime  @updatedAt
+}
+
+/// Cache generico no banco (sem Redis) para agregados computados.
+model CacheEntry {
+  key        String    @id
+  value      Json
+  computedAt DateTime  @default(now())
+  expiresAt  DateTime?
 }

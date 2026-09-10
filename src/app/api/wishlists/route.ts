@@ -1,27 +1,44 @@
 import { requireUser } from "@/lib/auth-context";
 import { handle, json } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
+import { buildPageMeta, parsePageParams } from "@/lib/pagination";
 import { serializeWishlist } from "@/lib/serialize";
 import { generateToken } from "@/lib/tokens";
-import { createWishlistSchema } from "@/lib/validations";
+import { createWishlistSchema, wishlistsQuerySchema } from "@/lib/validations";
 
-/** GET /api/wishlists — listas que eu possuo + listas em que colaboro. */
+/** GET /api/wishlists — listas que eu possuo + em que colaboro, paginadas. */
 export const GET = handle(async (req) => {
   const user = await requireUser(req);
 
-  const wishlists = await prisma.wishlist.findMany({
-    where: {
-      OR: [{ ownerId: user.id }, { collaborators: { some: { userId: user.id } } }],
-    },
-    orderBy: { updatedAt: "desc" },
-    include: {
-      owner: { select: { name: true } },
-      collaborators: { select: { userId: true, createdAt: true } },
-      _count: { select: { items: true } },
-    },
-  });
+  const url = new URL(req.url);
+  const query = wishlistsQuerySchema.parse(Object.fromEntries(url.searchParams));
+  const { page, pageSize, skip, take } = parsePageParams(query);
 
-  return json({ wishlists: wishlists.map((w) => serializeWishlist(w, user.id)) });
+  const term = query.q?.trim();
+  const where = {
+    OR: [{ ownerId: user.id }, { collaborators: { some: { userId: user.id } } }],
+    ...(term ? { name: { contains: term, mode: "insensitive" as const } } : {}),
+  };
+
+  const [wishlists, total] = await Promise.all([
+    prisma.wishlist.findMany({
+      where,
+      orderBy: { updatedAt: "desc" },
+      skip,
+      take,
+      include: {
+        owner: { select: { name: true } },
+        collaborators: { select: { userId: true, createdAt: true } },
+        _count: { select: { items: true } },
+      },
+    }),
+    prisma.wishlist.count({ where }),
+  ]);
+
+  return json({
+    wishlists: wishlists.map((w) => serializeWishlist(w, user.id)),
+    ...buildPageMeta(total, page, pageSize),
+  });
 });
 
 /** POST /api/wishlists — cria uma lista + um link de convite padrao (sem expiracao). */

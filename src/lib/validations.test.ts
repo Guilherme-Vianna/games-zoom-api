@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { addItemSchema, loginSchema, registerSchema } from "./validations";
+import {
+  addItemSchema,
+  itemsQuerySchema,
+  loginSchema,
+  notificationSettingsSchema,
+  registerSchema,
+  wishlistsQuerySchema,
+} from "./validations";
 
 describe("registerSchema", () => {
   it("normaliza email para minusculo e faz trim", () => {
@@ -43,5 +50,48 @@ describe("addItemSchema", () => {
   });
   it("rejeita input vazio", () => {
     expect(addItemSchema.safeParse({ input: "   " }).success).toBe(false);
+  });
+});
+
+describe("itemsQuerySchema", () => {
+  it("aplica defaults de paginacao", () => {
+    const p = itemsQuerySchema.parse({});
+    expect(p.page).toBe(1);
+    expect(p.pageSize).toBe(24);
+  });
+  it("coage strings de query", () => {
+    const p = itemsQuerySchema.parse({ page: "3", pageSize: "50", status: "onSale" });
+    expect(p).toMatchObject({ page: 3, pageSize: 50, status: "onSale" });
+  });
+  it("cai no default quando page e invalida", () => {
+    expect(itemsQuerySchema.parse({ page: "abc" }).page).toBe(1);
+  });
+  it("limita pageSize a 100", () => {
+    expect(itemsQuerySchema.parse({ pageSize: "999" }).pageSize).toBe(24);
+  });
+  it("rejeita status desconhecido", () => {
+    expect(itemsQuerySchema.safeParse({ status: "nope" }).success).toBe(false);
+  });
+});
+
+describe("wishlistsQuerySchema", () => {
+  it("defaults", () => {
+    expect(wishlistsQuerySchema.parse({})).toMatchObject({ page: 1, pageSize: 24 });
+  });
+});
+
+describe("notificationSettingsSchema", () => {
+  it("aceita hora valida", () => {
+    expect(
+      notificationSettingsSchema.parse({ saleDigestEnabled: true, deliveryHour: "21" }),
+    ).toEqual({ saleDigestEnabled: true, deliveryHour: 21 });
+  });
+  it("rejeita hora fora de 0-23", () => {
+    expect(
+      notificationSettingsSchema.safeParse({ saleDigestEnabled: false, deliveryHour: 24 }).success,
+    ).toBe(false);
+  });
+  it("exige o booleano", () => {
+    expect(notificationSettingsSchema.safeParse({ deliveryHour: 9 }).success).toBe(false);
   });
 });

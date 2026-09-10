@@ -2,9 +2,16 @@ import { requireUser } from "@/lib/auth-context";
 import { handle, HttpError, json } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import { serializeWishlist } from "@/lib/serialize";
-import { assertCanView, loadWishlistForUser } from "@/lib/wishlist-repo";
+import {
+  assertCanView,
+  loadWishlistCounts,
+  loadWishlistForUser,
+} from "@/lib/wishlist-repo";
 
-/** GET /api/wishlists/:id — detalhe com itens, colaboradores e (so p/ dono) convites. */
+/**
+ * GET /api/wishlists/:id — metadados da lista (colaboradores, convites p/ dono,
+ * contagem por status). Os itens vem paginados por `GET /wishlists/:id/items`.
+ */
 export const GET = handle(async (req, ctx) => {
   const user = await requireUser(req);
   const { id } = await ctx.params;
@@ -14,8 +21,10 @@ export const GET = handle(async (req, ctx) => {
   // Convites so aparecem para o dono.
   if (access.role !== "owner") wishlist.invites = [];
 
+  const counts = await loadWishlistCounts(id);
+
   return json({
-    wishlist: serializeWishlist(wishlist, user.id),
+    wishlist: serializeWishlist(wishlist, user.id, counts),
     access,
   });
 });
